@@ -3,14 +3,20 @@ package com.djd.fun.jsch;
 import java.io.File;
 import java.util.concurrent.ExecutionException;
 
+import javax.annotation.Nullable;
 import javax.swing.JTextField;
 import javax.swing.SwingWorker;
 
+import com.djd.fun.jsch.validator.ConnectionInfoValidator;
+import com.djd.fun.jsch.validator.ConnectionInfoValidator.StatusCode;
+import com.djd.fun.jsch.validator.EasyValidator;
 import com.google.common.annotations.VisibleForTesting;
 import com.jcraft.jsch.SftpProgressMonitor;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+
+import static com.djd.fun.jsch.validator.ConnectionInfoValidator.StatusCode.GOOD;
 
 public class MySwingWorker extends SwingWorker<File, Void> {
 
@@ -19,6 +25,9 @@ public class MySwingWorker extends SwingWorker<File, Void> {
   private final SftpProgressMonitor progressMonitor;
   private final JTextField textField;
   private final JschHelper jschHelper;
+  // This validator implementation should be injected into a constructor
+  private final ConnectionInfoValidator connectionInfoValidator = new EasyValidator();
+  private StatusCode stausCode = GOOD;
 
   @VisibleForTesting MySwingWorker(JschHelper jschHelper, DocumentModels documentModels,
       SftpProgressMonitor progressMonitor, JTextField textField) {
@@ -40,7 +49,7 @@ public class MySwingWorker extends SwingWorker<File, Void> {
    * @throws Exception
    */
   @Override
-  protected File doInBackground() throws Exception {
+  protected @Nullable File doInBackground() throws Exception {
     log.debug("Start slow job");
     ConnectionInfo connectionInfo = ConnectionInfo.builder()
         .hostname(documentModels.getHostnameText())
@@ -48,7 +57,12 @@ public class MySwingWorker extends SwingWorker<File, Void> {
         .password(documentModels.getPasswordText())
         .filename(documentModels.getFilenameText())
         .build();
-    return jschHelper.sftp(connectionInfo, progressMonitor);
+    stausCode = connectionInfoValidator.validate(connectionInfo);
+    if (stausCode == GOOD) {
+      return jschHelper.sftp(connectionInfo, progressMonitor);
+    } else {
+      return null;
+    }
   }
 
   /**
@@ -57,8 +71,11 @@ public class MySwingWorker extends SwingWorker<File, Void> {
   @Override
   protected void done() {
     try {
-      File download = get();
-      textField.setText(download.getAbsolutePath());
+      if (stausCode == GOOD) {
+        textField.setText(get().getAbsolutePath());
+      } else {
+        textField.setText("[ERROR] ConnectionInfo is invalid " + stausCode);
+      }
       textField.setEnabled(true);
     } catch (InterruptedException | ExecutionException e) {
       throw new RuntimeException(e);
